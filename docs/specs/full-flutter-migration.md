@@ -1,7 +1,37 @@
-# Full Flutter migration contract
+# Full Flutter 마이그레이션 범위와 완료 기준
 
-Baseline: FleetBridge v1.0 Add-to-App at ec218ab088e5120c9d874823b893f83f8d2b64e9. Migrate the ten-vehicle list, detail, simulation, OSM map and refrigeration command scenarios. Search by ID is an addition.
+이 문서는 이전 대상과 설계 기준을 정의합니다. 실제 실행 결과와 남은 검증은 [마이그레이션 기록](../migration.md)에서 관리합니다. 기준을 적었다는 사실만으로 검증 완료를 뜻하지는 않습니다.
 
-`Vehicle` and `VehicleRepository` move from Swift to typed Dart classes. Flutter owns list, navigation and detail. An ordinary Riverpod Provider creates and disposes a shared ChangeNotifier repository; ListenableBuilder subscribes to its changes on both screens. The repository tracks revisions and owns the timer and command concurrency. Background stops the timer; resume restarts it; disposal cancels it. Delayed command completion must not access a disposed screen or repository.
+## 기준과 범위
 
-Parity requires matching initial IDs, status, coordinates, battery, periodic changes and command outcomes, plus rejection of duplicate or older revisions. Test these with controlled clocks/delays and widget navigation. Analyze and test on Flutter 3.47.9; separately report iOS simulator build/run and Android build/run. Maps depend on network and OSM tile policy; simulate failures in tests. Actual vehicles and servers are out of scope.
+기준은 [FleetBridge v1.0 Add-to-App](https://github.com/CodingBot000/FleetBridge/releases/tag/v1.0-add-to-app)의 커밋 `ec218ab088e5120c9d874823b893f83f8d2b64e9`입니다. 원본 저장소를 변경하지 않고 독립된 Flutter iOS·Android 앱으로 이전합니다.
+
+이전 대상은 차량 10대의 목록과 상세, 차량 상태·위치·배터리 갱신, OpenStreetMap 지도, 냉동기 명령 시뮬레이션입니다. ID 검색과 지도 재시도는 추가 기능입니다. 실제 차량 제어와 관제 서버 연결은 범위에 포함하지 않습니다.
+
+## 구현 책임
+
+| 구성 | 책임 |
+| --- | --- |
+| Dart `Vehicle` | 타입이 명확한 차량 스냅샷 |
+| Dart `VehicleRepository` | 초기 데이터, 갱신 타이머, revision 검사, 차량별 명령 중복 방지 |
+| Riverpod 일반 `Provider` | 저장소의 생성·공유·해제 |
+| `ListenableBuilder` | ChangeNotifier 변경을 구독하고 목록·상세를 갱신 |
+| `FleetApp` | 앱 생명주기에 따른 타이머 중지·재시작 |
+| `VehicleList`, `VehicleDetail`, Navigator | 목록·상세 이동, 화면 임시 상태와 구독 정리 |
+
+차량 데이터용 MethodChannel과 수동 FlutterEngine 관리에 의존하지 않습니다. 플랫폼 플러그인 사용은 허용합니다. 상세 종료 후 응답은 닫힌 화면을 갱신하지 않아야 하며, 공유 저장소의 명령 완료와 화면 표시를 분리합니다.
+
+## 기능 동등성 기준
+
+- 초기 ID·이름·모델·좌표·상태·배터리와 갱신 규칙을 원본에 맞춥니다.
+- 오프라인 차량 갱신 중단, 중복·역순 revision 거부, 명령 성공·실패·시간 초과 및 중복 요청 처리를 확인합니다.
+- 백그라운드에서는 주기적 갱신을 중지하고 복귀 후 재시작합니다. 놓친 횟수를 소급 적용하지 않습니다.
+- 의도적인 동작 차이는 원본 동작과 새 동작을 나란히 기록합니다.
+
+검증에는 주입 가능한 시계·지연 완료와 위젯 테스트를 사용합니다. 이는 원본 코드에서 도출한 기대값을 확인하는 방식이며 두 런타임을 자동 대조하는 방식은 아닙니다.
+
+## 플랫폼별 검증 기준
+
+Flutter 3.47.9에서 `flutter analyze`와 `flutter test`를 실행합니다. iOS Simulator와 Android는 빌드 성공, 앱 실행, 화면·명령 흐름 확인을 각각 구분해 기록합니다. 기기 통합 테스트와 CI에서 실행한 테스트 범위도 구분합니다.
+
+지도 오류 주입은 실제 네트워크 장애 검증과 다릅니다. 외부 브라우저 호출은 목적지 페이지 표시 확인과 구분합니다. 검증하지 못한 조건은 미검증으로 남깁니다.
