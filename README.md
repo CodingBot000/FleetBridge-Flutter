@@ -14,7 +14,9 @@ Maps use OpenStreetMap tiles over the network, with visible attribution and an e
 
 Local Flutter analysis and four automated tests passed. Platform build and execution results are documented below as they are verified. Automated tests cover initial data, lookup, simulation, revision ordering, commands, lifecycle, navigation and a response after screen closure. Network tile error and attribution link behavior remain unverified on devices.
 
-iOS 26.5 Simulator (iPhone 17 Pro): simulator build and launch passed; list, detail map and successful command were observed. Android build and execution are tracked in the pull request.
+iOS 26.5 Simulator (iPhone 17 Pro): simulator build and launch passed; list, detail map and successful command were observed. Android debug APK build passed. Pixel 9 API 36 emulator installation, launch and vehicle list rendering passed; detail and command interaction on Android remains unverified. A separate emulator lacked storage for installation.
 
 ![iOS vehicle list](docs/screenshots/ios-list.png)
 ![iOS vehicle detail and successful simulated command](docs/screenshots/ios-detail.png)
+
+![Android vehicle list](docs/screenshots/android-list.png)
