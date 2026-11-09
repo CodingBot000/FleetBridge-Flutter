@@ -4,6 +4,15 @@ A standalone iOS and Android fleet simulation migrated from [FleetBridge v1.0 Ad
 
 The original architecture connected a UIKit list and Swift repository to an embedded Flutter detail via MethodChannel. Here both screens use a Riverpod-owned Dart repository and Flutter Navigator. See [migration evidence](docs/migration.md) and [contract](docs/specs/full-flutter-migration.md) for mappings, behavior changes and test correspondence.
 
+## Migration series
+
+This is **Part 2** of a two-stage mobile migration case study. The stages are preserved in separate repositories:
+
+- **Part 1 — [Native iOS + Flutter Add-to-App](https://github.com/CodingBot000/FleetBridge/releases/tag/v1.0-add-to-app)** ([source repository](https://github.com/CodingBot000/FleetBridge)): keep the UIKit host and Swift data source while embedding a Flutter detail screen
+- **Part 2 — [Full Flutter Migration](https://github.com/CodingBot000/FleetBridge-Flutter/releases/tag/v1.0-full-flutter)** (this repository): migrate the UI and vehicle business logic to shared Dart code for iOS and Android
+
+The repositories have independent Git histories. See [migration evidence](docs/migration.md) for class mappings, behavioral parity, and intentional differences. Both projects use simulated vehicle data and commands.
+
 ## Run
 
 Install Flutter 3.47.9 and platform toolchains, then run `flutter pub get` and `flutter run` on an iOS simulator or Android device. `flutter analyze` and `flutter test` run static analysis and automated checks. CI runs these checks on pull requests to main.
