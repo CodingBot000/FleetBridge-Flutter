@@ -1,0 +1,27 @@
+# Migration evidence
+
+Baseline: [v1.0 Add-to-App release](https://github.com/CodingBot000/FleetBridge/releases/tag/v1.0-add-to-app), [commit ec218ab088e5120c9d874823b893f83f8d2b64e9](https://github.com/CodingBot000/FleetBridge/commit/ec218ab088e5120c9d874823b893f83f8d2b64e9). The original repository is a read-only reference, not a runtime dependency.
+
+| Before | After | Responsibility |
+| --- | --- | --- |
+| Swift `Vehicle` | Dart `Vehicle` | Typed snapshot and revision |
+| Swift `VehicleRepository` | Dart `VehicleRepository` | Simulation and commands |
+| UIKit `ViewController` | Flutter `VehicleList`, `FleetApp` | List and lifecycle |
+| `VehicleDetailCoordinator`, FlutterEngine, MethodChannel | Flutter Navigator and `VehicleDetail` | Detail and navigation |
+| Flutter `VehicleDashboard`, revision gate | `VehicleDetail`, repository `apply` | Map, command UI and revision ordering |
+
+Before: UIKit → Swift repository → MethodChannel → Flutter detail. After: Flutter list/detail → Riverpod-owned Dart repository. Platform channels for vehicle data, manual engine management and UIKit navigation are gone. Flutter plugins still use platform integration for opening the attribution link.
+
+The ten initial records, status cycle, 5-second interval, movement, battery cadence and command delays/scenarios are retained. ID search is new. Commands now also fail if a vehicle becomes offline while pending. A command already dispatched continues after the detail closes, updating the shared repository; the closed screen ignores the result. Revision validation now guards the shared repository. Background pauses the timer and resume restarts it without catch-up.
+
+| Original tests | New coverage |
+| --- | --- |
+| VehicleRepositoryTests | Initial count, uniqueness, lookup |
+| VehicleSimulationTests | Movement, offline, status and battery |
+| Swift command tests | Success, failure, timeout, duplicate and offline |
+| Flutter revision gate and lifecycle tests | Repository revision gate; lifecycle widget test |
+| Flutter detail and command widget tests | Navigation and delayed response after closing; repository command outcomes |
+
+The first widget test exposed that a lazy detail list may not build offscreen controls; a larger test viewport permits deterministic interaction. Lifecycle tests must send the intermediate hidden/inactive states expected by Flutter. Map network errors and attribution interaction remain to be verified on devices. The built-in flutter_map tile cache follows HTTP cache headers and platform cache limits; it is opportunistic, not guaranteed offline storage. OSM attribution remains visible. Consult the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/) before deploying at scale.
+
+Platform results and outstanding checks are recorded in README. Automated coverage does not establish complete behavioral equivalence on both devices.
