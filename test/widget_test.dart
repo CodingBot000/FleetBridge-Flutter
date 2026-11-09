@@ -13,11 +13,30 @@ void main() {
     addTearDown(repo.dispose);
     expect(repo.vehicles.length, 10);
     expect(repo.vehicles.map((v) => v.id).toSet().length, 10);
+    for (var i = 0; i < 10; i++) {
+      final v = repo.vehicles[i];
+      final n = i + 1;
+      expect(v.id, 'vehicle-$n');
+      expect(v.name, '차량 $n');
+      expect(v.model, 'Fleet Model $n');
+      expect(v.latitude, closeTo(37.55 + n * .003, 1e-10));
+      expect(v.longitude, closeTo(126.96 + n * .003, 1e-10));
+      expect(v.status, VehicleStatus.values[i % 3]);
+      expect(v.battery, 95 - n * 3);
+      expect(v.revision, 0);
+      expect(v.updatedAt, now);
+      expect(v.refrigerationOn, isFalse);
+    }
     expect(repo.vehicle('missing'), isNull);
     final before = repo.vehicle('vehicle-1')!;
     final offline = repo.vehicle('vehicle-3')!;
     repo.advance();
     expect(repo.vehicle('vehicle-1')!.latitude, greaterThan(before.latitude));
+    expect(
+      repo.vehicle('vehicle-1')!.longitude,
+      closeTo(before.longitude + .0001, 1e-10),
+    );
+    expect(repo.vehicle('vehicle-2')!.latitude, closeTo(37.556, 1e-10));
     expect(repo.vehicle('vehicle-3'), same(offline));
     for (var i = 0; i < 5; i++) {
       repo.advance();

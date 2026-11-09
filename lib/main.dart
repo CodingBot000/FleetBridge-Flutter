@@ -131,9 +131,15 @@ class _VehicleListState extends ConsumerState<VehicleList> {
 }
 
 class VehicleDetail extends ConsumerStatefulWidget {
-  const VehicleDetail({super.key, required this.id, this.mapEnabled = true});
+  const VehicleDetail({
+    super.key,
+    required this.id,
+    this.mapEnabled = true,
+    this.tileProviderFactory,
+  });
   final String id;
   final bool mapEnabled;
+  final TileProvider Function()? tileProviderFactory;
   @override
   ConsumerState<VehicleDetail> createState() => _VehicleDetailState();
 }
@@ -142,6 +148,7 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
   CommandScenario scenario = CommandScenario.success;
   CommandResult? result;
   bool mapFailed = false;
+  int mapAttempt = 0;
   Future<void> send(VehicleRepository repo, Vehicle v) async {
     setState(() => result = null);
     final outcome = await repo.setRefrigeration(
@@ -163,6 +170,7 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
           final v = repo.vehicle(widget.id);
           if (v == null) return const Center(child: Text('차량 정보를 찾을 수 없습니다.'));
           final pending = repo.isPending(v.id);
+          final attempt = mapAttempt;
           final stale =
               DateTime.now().difference(v.updatedAt) >
               const Duration(seconds: 15);
@@ -196,6 +204,8 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
                   children: [
                     if (widget.mapEnabled)
                       TileLayer(
+                        key: ValueKey(mapAttempt),
+                        tileProvider: widget.tileProviderFactory?.call(),
                         urlTemplate:
                             'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                         userAgentPackageName:
@@ -203,7 +213,9 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
                         errorTileCallback: (tile, error, stack) {
                           if (!mapFailed) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted && !mapFailed) {
+                              if (mounted &&
+                                  !mapFailed &&
+                                  attempt == mapAttempt) {
                                 setState(() => mapFailed = true);
                               }
                             });
@@ -232,7 +244,16 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
                   ],
                 ),
               ),
-              if (mapFailed) const Text('지도를 불러올 수 없습니다. 네트워크 연결을 확인해 주세요.'),
+              if (mapFailed) ...[
+                const Text('지도를 불러올 수 없습니다. 네트워크 연결을 확인해 주세요.'),
+                TextButton(
+                  onPressed: () => setState(() {
+                    mapFailed = false;
+                    mapAttempt++;
+                  }),
+                  child: const Text('지도 다시 시도'),
+                ),
+              ],
               const SizedBox(height: 20),
               Text(
                 '냉동기 원격 명령 (시뮬레이션)',
