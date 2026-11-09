@@ -12,11 +12,9 @@ Maps use OpenStreetMap tiles over the network, with visible attribution and an e
 
 ## Verification
 
-Local Flutter analysis and four automated tests passed. Platform build and execution results are documented below as they are verified. Automated tests cover initial data, lookup, simulation, revision ordering, commands, lifecycle, navigation and a response after screen closure. Network tile error and attribution link behavior remain unverified on devices.
+`flutter analyze`, `flutter test` and the PR CI validate static analysis and deterministic tests. Pixel 9 API 36 and iPhone 17 Pro iOS 26.5 emulator/simulator integration tests exercised navigation, command outcomes, pending and offline controls, and state isolation. Android map tiles and marker were observed. Tile errors and retry were tested with injected failures on Android. The attribution tap opened Chrome's first-run screen; the destination page was not verified. Physical devices, real network outages and device background/resume remain unverified. See [migration evidence](docs/migration.md) for comparisons and limits.
 
-iOS 26.5 Simulator (iPhone 17 Pro): simulator build and launch passed; list, detail map and successful command were observed. Android debug APK build passed. Pixel 9 API 36 emulator installation, launch and vehicle list rendering passed; detail and command interaction on Android remains unverified. A separate emulator lacked storage for installation.
-
-![iOS vehicle list](docs/screenshots/ios-list.png)
-![iOS vehicle detail and successful simulated command](docs/screenshots/ios-detail.png)
-
-![Android vehicle list](docs/screenshots/android-list.png)
+![iOS vehicle detail](docs/screenshots/ios-detail.png)
+![Android vehicle detail](docs/screenshots/android-detail.png)
+![Android simulated command success](docs/screenshots/android-command-success.png)
+[Android command failure](docs/screenshots/android-command-failure.png) · [Android command timeout](docs/screenshots/android-command-timeout.png)
