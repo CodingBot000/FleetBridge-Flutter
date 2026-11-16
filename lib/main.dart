@@ -5,9 +5,32 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'vehicle.dart';
+import 'remote_vehicle_store.dart';
+import 'vehicle_api.dart';
 
-final repositoryProvider = Provider<VehicleRepository>((ref) {
-  final repository = VehicleRepository()..start();
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+
+final repositoryProvider = Provider<VehicleStore>((ref) {
+  const mode = String.fromEnvironment('FLEET_MODE', defaultValue: 'local');
+  if (!['local', 'remote'].contains(mode)) {
+    throw StateError('Invalid FLEET_MODE');
+  }
+  final VehicleStore repository;
+  if (mode == 'remote') {
+    const configured = String.fromEnvironment('FLEET_API_URL');
+    final url = configured.isNotEmpty
+        ? configured
+        : (defaultTargetPlatform == TargetPlatform.android
+              ? 'http://10.0.2.2:8080'
+              : 'http://127.0.0.1:8080');
+    repository = RemoteVehicleStore(
+      VehicleApi(baseUrl: Uri.parse(url), client: http.Client()),
+    );
+  } else {
+    repository = VehicleRepository();
+  }
+  repository.start();
   ref.onDispose(repository.dispose);
   return repository;
 });
@@ -79,6 +102,11 @@ class _VehicleListState extends ConsumerState<VehicleList> {
       appBar: AppBar(title: const Text('차량 목록')),
       body: Column(
         children: [
+          if (repo is RemoteVehicleStore)
+            ListenableBuilder(
+              listenable: repo,
+              builder: (context, _) => RemoteStatus(store: repo),
+            ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(
@@ -149,7 +177,17 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
   CommandResult? result;
   bool mapFailed = false;
   int mapAttempt = 0;
-  Future<void> send(VehicleRepository repo, Vehicle v) async {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final repo = ref.read(repositoryProvider);
+      if (repo is RemoteVehicleStore) repo.loadDetail(widget.id);
+    });
+  }
+
+  Future<void> send(VehicleStore repo, Vehicle v) async {
     setState(() => result = null);
     final outcome = await repo.setRefrigeration(
       v.id,
@@ -168,15 +206,29 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
         listenable: repo,
         builder: (context, _) {
           final v = repo.vehicle(widget.id);
-          if (v == null) return const Center(child: Text('차량 정보를 찾을 수 없습니다.'));
+          if (v == null) {
+            return Center(
+              child: Text(
+                repo is RemoteVehicleStore && repo.loading
+                    ? '서버 조회 중…'
+                    : '차량 정보를 찾을 수 없습니다.',
+              ),
+            );
+          }
           final pending = repo.isPending(v.id);
+          final remote = repo is RemoteVehicleStore ? repo : null;
+          final displayedResult = remote == null
+              ? result
+              : remote.results[v.id];
           final attempt = mapAttempt;
           final stale =
               DateTime.now().difference(v.updatedAt) >
               const Duration(seconds: 15);
           return ListView(
+            key: const ValueKey('vehicle-detail-scroll'),
             padding: const EdgeInsets.all(20),
             children: [
+              if (remote != null) RemoteStatus(store: remote),
               Text(v.name, style: Theme.of(context).textTheme.headlineMedium),
               Text(v.model),
               Text(v.id),
@@ -287,14 +339,30 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
                 onPressed: pending || v.status == VehicleStatus.offline
                     ? null
                     : () => send(repo, v),
-                child: Text(pending ? '처리 중…' : '냉동기 전환'),
+                child: Text(
+                  pending
+                      ? (remote != null && !remote.isSending(v.id)
+                            ? '결과 확인 필요'
+                            : '처리 중…')
+                      : '냉동기 전환',
+                ),
               ),
-              if (result != null)
-                Text(switch (result!) {
+              if (remote != null && pending && !remote.isSending(v.id)) ...[
+                Text('요청 ID: ${remote.requestIdFor(v.id)}'),
+                TextButton(
+                  onPressed: remote.isChecking(v.id)
+                      ? null
+                      : () => remote.checkCommand(v.id),
+                  child: const Text('명령 결과 조회'),
+                ),
+              ],
+              if (displayedResult != null)
+                Text(switch (displayedResult) {
                   CommandResult.success => '명령 성공',
                   CommandResult.failure => '명령 실패',
                   CommandResult.timeout => '응답 시간 초과',
                   CommandResult.busy => '명령 처리 중',
+                  CommandResult.unknown => '결과 확인 필요 — 서버 처리 여부가 불명확합니다.',
                 }),
             ],
           );
@@ -302,4 +370,24 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
       ),
     );
   }
+}
+
+class RemoteStatus extends StatelessWidget {
+  const RemoteStatus({super.key, required this.store});
+  final RemoteVehicleStore store;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(8),
+    child: Column(
+      children: [
+        Text(store.loading ? 'Remote · 서버 조회 중…' : 'Remote · Mock API'),
+        if (store.error != null) Text(store.error!),
+        if (store.error != null) const Text('표시 중인 값은 마지막으로 받은 데이터입니다.'),
+        TextButton(
+          onPressed: store.loading ? null : store.refresh,
+          child: const Text('서버 새로고침'),
+        ),
+      ],
+    ),
+  );
 }
