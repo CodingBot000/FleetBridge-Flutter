@@ -4,7 +4,11 @@ import 'package:integration_test/integration_test_driver_extended.dart';
 
 Future<void> main() => integrationDriver(
   onScreenshot: (name, bytes, [args]) async {
-    await File('docs/screenshots/$name.png').writeAsBytes(bytes);
+    final directory = Directory(
+      Platform.environment['FLEET_SCREENSHOT_DIR'] ?? 'docs/screenshots',
+    );
+    await directory.create(recursive: true);
+    await File('${directory.path}/$name.png').writeAsBytes(bytes);
     return true;
   },
 );

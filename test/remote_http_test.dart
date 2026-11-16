@@ -14,6 +14,7 @@ void main() {
       final server = await Process.start('python3', [
         '-u',
         'mock_server/server.py',
+        '--no-ticks',
         '--port',
         '0',
       ]);
