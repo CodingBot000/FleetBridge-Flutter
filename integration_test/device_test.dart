@@ -1,3 +1,5 @@
+import 'scroll_helpers.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -30,11 +32,7 @@ void main() {
     expect(find.byIcon(Icons.location_on), findsOneWidget);
     await tester.pump(const Duration(seconds: 5));
     await screenshot(tester, 'android-detail');
-    await tester.scrollUntilVisible(
-      find.text('냉동기 전환'),
-      250,
-      scrollable: find.byType(Scrollable).last,
-    );
+    await revealDetail(tester, find.text('냉동기 전환'));
     await tester.tap(find.text('냉동기 전환'));
     await tester.pump();
     expect(find.text('처리 중…'), findsOneWidget);
@@ -67,11 +65,7 @@ void main() {
     expect(find.text('차량 목록'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('vehicle-3')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('냉동기 전환'),
-      250,
-      scrollable: find.byType(Scrollable).last,
-    );
+    await revealDetail(tester, find.text('냉동기 전환'));
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
@@ -82,11 +76,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('vehicle-2')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('냉동기 전환'),
-      250,
-      scrollable: find.byType(Scrollable).last,
-    );
+    await revealDetail(tester, find.text('냉동기 전환'));
     expect(find.text('현재: 꺼짐'), findsOneWidget);
     expect(find.text('성공 시나리오'), findsOneWidget);
   });
