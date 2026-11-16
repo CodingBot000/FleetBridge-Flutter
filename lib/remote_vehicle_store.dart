@@ -12,7 +12,12 @@ class _ReadOperation {
   final done = Completer<void>();
 }
 
-typedef _Command = ({String requestId, bool enabled, CommandScenario scenario});
+typedef _Command = ({
+  String requestId,
+  bool enabled,
+  CommandScenario scenario,
+  int baselineRevision,
+});
 
 class RemoteVehicleStore extends VehicleStore {
   RemoteVehicleStore(
@@ -29,6 +34,8 @@ class RemoteVehicleStore extends VehicleStore {
   Map<String, CommandResult> get results => Map.unmodifiable(_results);
   final Set<String> _checking = {};
   final Set<String> _sending = {};
+  final Set<String> _syncing = {};
+  bool isSynchronizing(String id) => _syncing.contains(id);
   Timer? _timer;
   bool _disposed = false;
   _ReadOperation? _listRead;
@@ -79,6 +86,9 @@ class RemoteVehicleStore extends VehicleStore {
   }
 
   Future<void> _load(_ReadOperation operation) async {
+    final confirmations = {
+      for (final id in _syncing) id: _unresolved[id]?.requestId,
+    };
     try {
       _changed();
       if (_disposed || !identical(_listRead, operation)) return;
@@ -86,6 +96,17 @@ class RemoteVehicleStore extends VehicleStore {
       if (_disposed || !identical(_listRead, operation)) return;
       for (final v in incoming) {
         _accept(v);
+      }
+      for (final v in incoming) {
+        final command = _unresolved[v.id];
+        if (command != null &&
+            _syncing.contains(v.id) &&
+            confirmations[v.id] == command.requestId &&
+            v.revision > command.baselineRevision &&
+            v.revision >= vehicle(v.id)!.revision) {
+          _syncing.remove(v.id);
+          _unresolved.remove(v.id);
+        }
       }
       _listError = null;
     } catch (e) {
@@ -165,6 +186,7 @@ class RemoteVehicleStore extends VehicleStore {
       requestId: requestId,
       enabled: enabled,
       scenario: scenario,
+      baselineRevision: current.revision,
     );
     _sending.add(id);
     _results.remove(id);
@@ -182,7 +204,11 @@ class RemoteVehicleStore extends VehicleStore {
     if (_disposed) return result;
     _sending.remove(id);
     _results[id] = result;
-    if (result != CommandResult.unknown) _unresolved.remove(id);
+    if (result == CommandResult.success) {
+      _syncing.add(id);
+    } else if (result != CommandResult.unknown) {
+      _unresolved.remove(id);
+    }
     _changed();
     if (result == CommandResult.success) await _refreshAfterCommand();
     return result;
@@ -193,6 +219,7 @@ class RemoteVehicleStore extends VehicleStore {
     if (_disposed ||
         command == null ||
         _sending.contains(id) ||
+        _syncing.contains(id) ||
         !_checking.add(id)) {
       return CommandResult.busy;
     }
@@ -212,7 +239,11 @@ class RemoteVehicleStore extends VehicleStore {
     if (_disposed) return result;
     _checking.remove(id);
     _results[id] = result;
-    if (result != CommandResult.unknown) _unresolved.remove(id);
+    if (result == CommandResult.success) {
+      _syncing.add(id);
+    } else if (result != CommandResult.unknown) {
+      _unresolved.remove(id);
+    }
     _changed();
     if (result == CommandResult.success) await _refreshAfterCommand();
     return result;

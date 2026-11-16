@@ -99,6 +99,7 @@ void main() {
         final posts = <String, Completer<http.Response>>{};
         final queries = <Completer<http.Response>>[];
         var seq = 0;
+        var lists = 0;
         final store = RemoteVehicleStore(
           VehicleApi(
             baseUrl: Uri.parse('http://localhost'),
@@ -114,8 +115,13 @@ void main() {
                 queries.add(c);
                 return c.future;
               }
+              final committed = lists++ > 0 && terminal == 'success';
               return jsonResponse([
-                sample(),
+                {
+                  ...sample(),
+                  'revision': committed ? 1 : 0,
+                  'refrigerationOn': committed,
+                },
                 {...sample(), 'id': 'vehicle-2'},
               ]);
             }),

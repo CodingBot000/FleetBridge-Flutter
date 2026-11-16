@@ -222,6 +222,8 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
             );
           }
           final pending = repo.isPending(v.id);
+          final synchronizing =
+              repo is RemoteVehicleStore && repo.isSynchronizing(v.id);
           final remote = repo is RemoteVehicleStore ? repo : null;
           final displayedResult = remote == null
               ? result
@@ -319,7 +321,9 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
                     ? null
                     : () => send(repo, v),
                 child: Text(
-                  pending
+                  synchronizing
+                      ? '차량 상태 확인 필요'
+                      : pending
                       ? (remote != null && !remote.isSending(v.id)
                             ? '결과 확인 필요'
                             : '처리 중…')
@@ -329,12 +333,18 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
               if (remote != null && pending && !remote.isSending(v.id)) ...[
                 Text('요청 ID: ${remote.requestIdFor(v.id)}'),
                 TextButton(
-                  onPressed: remote.isChecking(v.id)
+                  onPressed:
+                      (remote.isChecking(v.id) ||
+                          (synchronizing && remote.loading))
                       ? null
-                      : () => remote.checkCommand(v.id),
-                  child: const Text('명령 결과 조회'),
+                      : () => synchronizing
+                            ? remote.refresh()
+                            : remote.checkCommand(v.id),
+                  child: Text(synchronizing ? '차량 상태 다시 조회' : '명령 결과 조회'),
                 ),
               ],
+              if (synchronizing)
+                const Text('명령은 성공했습니다. 최신 차량 상태를 확인한 뒤 다시 명령할 수 있습니다.'),
               if (displayedResult != null)
                 Text(switch (displayedResult) {
                   CommandResult.success => '명령 성공',
