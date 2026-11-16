@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'vehicle.dart';
+import 'vehicle_map.dart';
 import 'remote_vehicle_store.dart';
 import 'vehicle_api.dart';
 
@@ -256,52 +255,24 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
               const SizedBox(height: 16),
               SizedBox(
                 height: 300,
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: LatLng(v.latitude, v.longitude),
-                    initialZoom: 13,
-                  ),
-                  children: [
-                    if (widget.mapEnabled)
-                      TileLayer(
-                        key: ValueKey(mapAttempt),
-                        tileProvider: widget.tileProviderFactory?.call(),
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName:
-                            'com.codingbot000.fleetbridge_flutter',
-                        errorTileCallback: (tile, error, stack) {
-                          if (!mapFailed) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted &&
-                                  !mapFailed &&
-                                  attempt == mapAttempt) {
-                                setState(() => mapFailed = true);
-                              }
-                            });
-                          }
-                        },
-                      ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: LatLng(v.latitude, v.longitude),
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.red,
-                            size: 36,
-                          ),
-                        ),
-                      ],
-                    ),
-                    SimpleAttributionWidget(
-                      source: const Text('OpenStreetMap contributors'),
-                      onTap: () => launchUrl(
-                        Uri.parse('https://www.openstreetmap.org/copyright'),
-                        mode: LaunchMode.externalApplication,
-                      ),
-                    ),
-                  ],
+                child: VehicleMap(
+                  key: ValueKey((
+                    mapAttempt,
+                    widget.mapEnabled,
+                    widget.tileProviderFactory,
+                  )),
+                  vehicle: v,
+                  enabled: widget.mapEnabled,
+                  tileProviderFactory: widget.tileProviderFactory,
+                  onError: () {
+                    if (!mapFailed) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted && !mapFailed && attempt == mapAttempt) {
+                          setState(() => mapFailed = true);
+                        }
+                      });
+                    }
+                  },
                 ),
               ),
               if (mapFailed) ...[
