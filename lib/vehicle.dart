@@ -6,7 +6,7 @@ enum VehicleStatus { driving, idle, offline }
 
 enum CommandScenario { success, failure, timeout }
 
-enum CommandResult { success, failure, timeout, busy }
+enum CommandResult { success, failure, timeout, busy, unknown }
 
 @immutable
 class Vehicle {
@@ -50,7 +50,20 @@ class Vehicle {
   );
 }
 
-class VehicleRepository extends ChangeNotifier {
+abstract class VehicleStore extends ChangeNotifier {
+  List<Vehicle> get vehicles;
+  Vehicle? vehicle(String id);
+  bool isPending(String id);
+  void start();
+  void stop();
+  Future<CommandResult> setRefrigeration(
+    String id,
+    bool enabled,
+    CommandScenario scenario,
+  );
+}
+
+class VehicleRepository extends VehicleStore {
   VehicleRepository({
     DateTime Function()? clock,
     Future<void> Function(Duration)? delay,
@@ -77,9 +90,12 @@ class VehicleRepository extends ChangeNotifier {
   final Set<String> _pending = {};
   Timer? _timer;
   bool _disposed = false;
+  @override
   List<Vehicle> get vehicles => List.unmodifiable(_vehicles);
   bool get isRunning => _timer != null;
+  @override
   bool isPending(String id) => _pending.contains(id);
+  @override
   Vehicle? vehicle(String id) {
     for (final v in _vehicles) {
       if (v.id == id) return v;
@@ -87,12 +103,14 @@ class VehicleRepository extends ChangeNotifier {
     return null;
   }
 
+  @override
   void start() {
     if (!_disposed) {
       _timer ??= Timer.periodic(const Duration(seconds: 5), (_) => advance());
     }
   }
 
+  @override
   void stop() {
     _timer?.cancel();
     _timer = null;
@@ -133,6 +151,7 @@ class VehicleRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   Future<CommandResult> setRefrigeration(
     String id,
     bool enabled,

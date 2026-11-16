@@ -1,0 +1,24 @@
+API start: healthy
+API start: 503
+API stopped for connection failure
+API start: healthy
+Background: no list requests for 6 seconds;       topResumedActivity=ActivityRecord{90792231 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t2}
+Foreground: list refresh resumed
+127.0.0.1 - - [16/Nov/2026 20:44:25] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:27] "GET /vehicles HTTP/1.1" 503 -
+127.0.0.1 - - [16/Nov/2026 20:44:31] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:40] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:42] "GET /vehicles/vehicle-1 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:43] "POST /commands HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:44] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:45] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:47] "POST /commands HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:49] "GET /vehicles/vehicle-2 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:50] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:51] "GET /vehicles/vehicle-3 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:52] "POST /commands HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:53] "GET /vehicles/vehicle-1 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:44:55] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:45:00] "GET /vehicles HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:45:01] "GET /commands/VJGL_6BlU5BP6LP_-NWaY1VfgjN-G9aY HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 20:45:02] "GET /vehicles HTTP/1.1" 200 -

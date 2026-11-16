@@ -1,13 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'vehicle.dart';
+import 'vehicle_map.dart';
+import 'remote_vehicle_store.dart';
+import 'vehicle_api.dart';
 
-final repositoryProvider = Provider<VehicleRepository>((ref) {
-  final repository = VehicleRepository()..start();
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+
+final repositoryProvider = Provider<VehicleStore>((ref) {
+  const mode = String.fromEnvironment('FLEET_MODE', defaultValue: 'local');
+  if (!['local', 'remote'].contains(mode)) {
+    throw StateError('Invalid FLEET_MODE');
+  }
+  final VehicleStore repository;
+  if (mode == 'remote') {
+    const configured = String.fromEnvironment('FLEET_API_URL');
+    final url = configured.isNotEmpty
+        ? configured
+        : (defaultTargetPlatform == TargetPlatform.android
+              ? 'http://10.0.2.2:8080'
+              : 'http://127.0.0.1:8080');
+    repository = RemoteVehicleStore(
+      VehicleApi(baseUrl: Uri.parse(url), client: http.Client()),
+    );
+  } else {
+    repository = VehicleRepository();
+  }
+  repository.start();
   ref.onDispose(repository.dispose);
   return repository;
 });
@@ -79,6 +101,11 @@ class _VehicleListState extends ConsumerState<VehicleList> {
       appBar: AppBar(title: const Text('차량 목록')),
       body: Column(
         children: [
+          if (repo is RemoteVehicleStore)
+            ListenableBuilder(
+              listenable: repo,
+              builder: (context, _) => RemoteStatus(store: repo),
+            ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(
@@ -149,7 +176,17 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
   CommandResult? result;
   bool mapFailed = false;
   int mapAttempt = 0;
-  Future<void> send(VehicleRepository repo, Vehicle v) async {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final repo = ref.read(repositoryProvider);
+      if (repo is RemoteVehicleStore) repo.loadDetail(widget.id);
+    });
+  }
+
+  Future<void> send(VehicleStore repo, Vehicle v) async {
     setState(() => result = null);
     final outcome = await repo.setRefrigeration(
       v.id,
@@ -168,15 +205,39 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
         listenable: repo,
         builder: (context, _) {
           final v = repo.vehicle(widget.id);
-          if (v == null) return const Center(child: Text('차량 정보를 찾을 수 없습니다.'));
+          if (v == null) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (repo is RemoteVehicleStore)
+                    RemoteStatus(store: repo, vehicleId: widget.id),
+                  Text(
+                    repo is RemoteVehicleStore && repo.loadingFor(widget.id)
+                        ? '서버 조회 중…'
+                        : '차량 정보를 찾을 수 없습니다.',
+                  ),
+                ],
+              ),
+            );
+          }
           final pending = repo.isPending(v.id);
+          final synchronizing =
+              repo is RemoteVehicleStore && repo.isSynchronizing(v.id);
+          final remote = repo is RemoteVehicleStore ? repo : null;
+          final displayedResult = remote == null
+              ? result
+              : remote.results[v.id];
           final attempt = mapAttempt;
           final stale =
               DateTime.now().difference(v.updatedAt) >
               const Duration(seconds: 15);
           return ListView(
+            key: const ValueKey('vehicle-detail-scroll'),
             padding: const EdgeInsets.all(20),
             children: [
+              if (remote != null)
+                RemoteStatus(store: remote, vehicleId: widget.id),
               Text(v.name, style: Theme.of(context).textTheme.headlineMedium),
               Text(v.model),
               Text(v.id),
@@ -196,52 +257,24 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
               const SizedBox(height: 16),
               SizedBox(
                 height: 300,
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: LatLng(v.latitude, v.longitude),
-                    initialZoom: 13,
-                  ),
-                  children: [
-                    if (widget.mapEnabled)
-                      TileLayer(
-                        key: ValueKey(mapAttempt),
-                        tileProvider: widget.tileProviderFactory?.call(),
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName:
-                            'com.codingbot000.fleetbridge_flutter',
-                        errorTileCallback: (tile, error, stack) {
-                          if (!mapFailed) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted &&
-                                  !mapFailed &&
-                                  attempt == mapAttempt) {
-                                setState(() => mapFailed = true);
-                              }
-                            });
-                          }
-                        },
-                      ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: LatLng(v.latitude, v.longitude),
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.red,
-                            size: 36,
-                          ),
-                        ),
-                      ],
-                    ),
-                    SimpleAttributionWidget(
-                      source: const Text('OpenStreetMap contributors'),
-                      onTap: () => launchUrl(
-                        Uri.parse('https://www.openstreetmap.org/copyright'),
-                        mode: LaunchMode.externalApplication,
-                      ),
-                    ),
-                  ],
+                child: VehicleMap(
+                  key: ValueKey((
+                    mapAttempt,
+                    widget.mapEnabled,
+                    widget.tileProviderFactory,
+                  )),
+                  vehicle: v,
+                  enabled: widget.mapEnabled,
+                  tileProviderFactory: widget.tileProviderFactory,
+                  onError: () {
+                    if (!mapFailed) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted && !mapFailed && attempt == mapAttempt) {
+                          setState(() => mapFailed = true);
+                        }
+                      });
+                    }
+                  },
                 ),
               ),
               if (mapFailed) ...[
@@ -287,18 +320,74 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
                 onPressed: pending || v.status == VehicleStatus.offline
                     ? null
                     : () => send(repo, v),
-                child: Text(pending ? '처리 중…' : '냉동기 전환'),
+                child: Text(
+                  synchronizing
+                      ? '차량 상태 확인 필요'
+                      : pending
+                      ? (remote != null && !remote.isSending(v.id)
+                            ? '결과 확인 필요'
+                            : '처리 중…')
+                      : '냉동기 전환',
+                ),
               ),
-              if (result != null)
-                Text(switch (result!) {
+              if (remote != null && pending && !remote.isSending(v.id)) ...[
+                Text('요청 ID: ${remote.requestIdFor(v.id)}'),
+                TextButton(
+                  onPressed:
+                      (remote.isChecking(v.id) ||
+                          (synchronizing && remote.loading))
+                      ? null
+                      : () => synchronizing
+                            ? remote.refresh()
+                            : remote.checkCommand(v.id),
+                  child: Text(synchronizing ? '차량 상태 다시 조회' : '명령 결과 조회'),
+                ),
+              ],
+              if (synchronizing)
+                const Text('명령은 성공했습니다. 최신 차량 상태를 확인한 뒤 다시 명령할 수 있습니다.'),
+              if (displayedResult != null)
+                Text(switch (displayedResult) {
                   CommandResult.success => '명령 성공',
                   CommandResult.failure => '명령 실패',
                   CommandResult.timeout => '응답 시간 초과',
                   CommandResult.busy => '명령 처리 중',
+                  CommandResult.unknown => '결과 확인 필요 — 서버 처리 여부가 불명확합니다.',
                 }),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class RemoteStatus extends StatelessWidget {
+  const RemoteStatus({super.key, required this.store, this.vehicleId});
+  final String? vehicleId;
+  final RemoteVehicleStore store;
+  @override
+  Widget build(BuildContext context) {
+    final loading = vehicleId == null
+        ? store.loading
+        : store.loadingFor(vehicleId!);
+    final error = vehicleId == null ? store.error : store.errorFor(vehicleId!);
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          Text(loading ? 'Remote · 서버 조회 중…' : 'Remote · Mock API'),
+          if (error != null) Text(error),
+          if (error != null) const Text('표시 중인 값은 마지막으로 받은 데이터입니다.'),
+          TextButton(
+            onPressed: loading
+                ? null
+                : () {
+                    store.refresh();
+                    if (vehicleId != null) store.loadDetail(vehicleId!);
+                  },
+            child: const Text('서버 새로고침'),
+          ),
+        ],
       ),
     );
   }
