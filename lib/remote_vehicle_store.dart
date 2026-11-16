@@ -8,6 +8,12 @@ import 'vehicle_api.dart';
 String newRequestId() =>
     base64UrlEncode(List.generate(24, (_) => Random.secure().nextInt(256)));
 
+class _ReadOperation {
+  final done = Completer<void>();
+}
+
+typedef _Command = ({String requestId, bool enabled, CommandScenario scenario});
+
 class RemoteVehicleStore extends VehicleStore {
   RemoteVehicleStore(
     this.api, {
@@ -18,16 +24,21 @@ class RemoteVehicleStore extends VehicleStore {
   final String Function() _requestId;
   final Duration pollInterval;
   final List<Vehicle> _vehicles = [];
-  final Map<String, String> _unresolved = {};
-  final Map<String, CommandResult> results = {};
+  final Map<String, _Command> _unresolved = {};
+  final Map<String, CommandResult> _results = {};
+  Map<String, CommandResult> get results => Map.unmodifiable(_results);
   final Set<String> _checking = {};
   final Set<String> _sending = {};
   Timer? _timer;
   bool _disposed = false;
-  bool loading = false;
-  String? error;
-  int _epoch = 0;
-  Future<void>? _refresh;
+  _ReadOperation? _listRead;
+  final Map<String, _ReadOperation> _detailReads = {};
+  String? _listError;
+  final Map<String, String> _detailErrors = {};
+  bool get loading => _listRead != null;
+  String? get error => _listError;
+  bool loadingFor(String id) => loading || _detailReads.containsKey(id);
+  String? errorFor(String id) => _detailErrors[id] ?? _listError;
   @override
   List<Vehicle> get vehicles => List.unmodifiable(_vehicles);
   @override
@@ -40,14 +51,14 @@ class RemoteVehicleStore extends VehicleStore {
 
   @override
   bool isPending(String id) => _unresolved.containsKey(id);
-  String? requestIdFor(String id) => _unresolved[id];
+  String? requestIdFor(String id) => _unresolved[id]?.requestId;
   bool isSending(String id) => _sending.contains(id);
   bool isChecking(String id) => _checking.contains(id);
-  void changed() {
+  void _changed() {
     if (!_disposed) notifyListeners();
   }
 
-  void accept(Vehicle incoming) {
+  void _accept(Vehicle incoming) {
     final index = _vehicles.indexWhere((v) => v.id == incoming.id);
     if (index < 0) {
       _vehicles.add(incoming);
@@ -58,56 +69,83 @@ class RemoteVehicleStore extends VehicleStore {
 
   Future<void> refresh() {
     if (_disposed) return Future.value();
-    return _refresh ??= _load().whenComplete(() => _refresh = null);
+    final active = _listRead;
+    if (active != null) return active.done.future;
+    final operation = _ReadOperation();
+    // Register before notifying: listeners can synchronously request refresh.
+    _listRead = operation;
+    unawaited(_load(operation));
+    return operation.done.future;
   }
 
-  Future<void> _load() async {
-    final epoch = _epoch;
-    loading = true;
-    changed();
+  Future<void> _load(_ReadOperation operation) async {
     try {
+      _changed();
+      if (_disposed || !identical(_listRead, operation)) return;
       final incoming = await api.list();
-      if (_disposed || epoch != _epoch) return;
-      // The mock fleet has stable IDs. Never derive or simulate remote values.
+      if (_disposed || !identical(_listRead, operation)) return;
       for (final v in incoming) {
-        accept(v);
+        _accept(v);
       }
-      error = null;
+      _listError = null;
     } catch (e) {
-      if (!_disposed && epoch == _epoch) error = '서버 조회 실패: $e';
-    } finally {
-      if (!_disposed) {
-        loading = false;
-        changed();
+      if (!_disposed && identical(_listRead, operation)) {
+        _listError = '서버 조회 실패: $e';
       }
+    } finally {
+      if (!_disposed && identical(_listRead, operation)) {
+        _listRead = null;
+        _changed();
+      }
+      operation.done.complete();
     }
   }
 
-  Future<void> loadDetail(String id) async {
-    final epoch = _epoch;
+  Future<void> loadDetail(String id) {
+    if (_disposed) return Future.value();
+    final active = _detailReads[id];
+    if (active != null) return active.done.future;
+    final operation = _ReadOperation();
+    _detailReads[id] = operation;
+    unawaited(_loadDetail(id, operation));
+    return operation.done.future;
+  }
+
+  Future<void> _loadDetail(String id, _ReadOperation operation) async {
     try {
+      _changed();
+      if (_disposed || !identical(_detailReads[id], operation)) return;
       final incoming = await api.detail(id);
-      if (_disposed || epoch != _epoch) return;
-      accept(incoming);
-      error = null;
+      if (_disposed || !identical(_detailReads[id], operation)) return;
+      _accept(incoming);
+      _detailErrors.remove(id);
     } catch (e) {
-      if (!_disposed && epoch == _epoch) error = '상세 조회 실패: $e';
+      if (!_disposed && identical(_detailReads[id], operation)) {
+        _detailErrors[id] = '상세 조회 실패: $e';
+      }
+    } finally {
+      if (!_disposed && identical(_detailReads[id], operation)) {
+        _detailReads.remove(id);
+        _changed();
+      }
+      operation.done.complete();
     }
-    changed();
   }
 
   @override
   void start() {
     if (_disposed || _timer != null) return;
-    unawaited(refresh());
     _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
+    unawaited(refresh());
   }
 
   @override
   void stop() {
     _timer?.cancel();
     _timer = null;
-    _epoch++;
+    _listRead = null;
+    _detailReads.clear();
+    _changed();
   }
 
   @override
@@ -123,50 +161,68 @@ class RemoteVehicleStore extends VehicleStore {
       return CommandResult.failure;
     }
     final requestId = _requestId();
-    _unresolved[id] = requestId;
+    _unresolved[id] = (
+      requestId: requestId,
+      enabled: enabled,
+      scenario: scenario,
+    );
     _sending.add(id);
-    results.remove(id);
-    changed();
+    _results.remove(id);
+    _changed();
+    if (_disposed) return CommandResult.unknown;
     var result = CommandResult.unknown;
     try {
       result = await api.command(requestId, id, enabled, scenario);
     } on ApiException catch (e) {
       // These responses explicitly reject admission; 5xx/transport errors do not.
-      if ([400, 409, 422].contains(e.status)) result = CommandResult.failure;
+      if (e.rejected) result = CommandResult.failure;
     } catch (_) {
       /* Delivery or completion is unknown. Never automatically POST again. */
     }
     if (_disposed) return result;
     _sending.remove(id);
-    results[id] = result;
+    _results[id] = result;
     if (result != CommandResult.unknown) _unresolved.remove(id);
-    changed();
-    if (result == CommandResult.success) await refresh();
+    _changed();
+    if (result == CommandResult.success) await _refreshAfterCommand();
     return result;
   }
 
   Future<CommandResult> checkCommand(String id) async {
-    final requestId = _unresolved[id];
+    final command = _unresolved[id];
     if (_disposed ||
-        requestId == null ||
+        command == null ||
         _sending.contains(id) ||
         !_checking.add(id)) {
       return CommandResult.busy;
     }
-    changed();
+    _changed();
+    if (_disposed) return CommandResult.unknown;
     var result = CommandResult.unknown;
     try {
-      result = await api.commandStatus(requestId);
+      result = await api.commandStatus(
+        command.requestId,
+        vehicleId: id,
+        enabled: command.enabled,
+        scenario: command.scenario,
+      );
     } catch (_) {
       /* Keep blocked, including 404 after server restart. */
     }
     if (_disposed) return result;
     _checking.remove(id);
-    results[id] = result;
+    _results[id] = result;
     if (result != CommandResult.unknown) _unresolved.remove(id);
-    changed();
-    if (result == CommandResult.success) await refresh();
+    _changed();
+    if (result == CommandResult.success) await _refreshAfterCommand();
     return result;
+  }
+
+  Future<void> _refreshAfterCommand() {
+    if (_disposed) return Future.value();
+    // A read started before completion cannot confirm the command effect.
+    _listRead = null;
+    return refresh();
   }
 
   @override

@@ -208,10 +208,17 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
           final v = repo.vehicle(widget.id);
           if (v == null) {
             return Center(
-              child: Text(
-                repo is RemoteVehicleStore && repo.loading
-                    ? '서버 조회 중…'
-                    : '차량 정보를 찾을 수 없습니다.',
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (repo is RemoteVehicleStore)
+                    RemoteStatus(store: repo, vehicleId: widget.id),
+                  Text(
+                    repo is RemoteVehicleStore && repo.loadingFor(widget.id)
+                        ? '서버 조회 중…'
+                        : '차량 정보를 찾을 수 없습니다.',
+                  ),
+                ],
               ),
             );
           }
@@ -228,7 +235,8 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
             key: const ValueKey('vehicle-detail-scroll'),
             padding: const EdgeInsets.all(20),
             children: [
-              if (remote != null) RemoteStatus(store: remote),
+              if (remote != null)
+                RemoteStatus(store: remote, vehicleId: widget.id),
               Text(v.name, style: Theme.of(context).textTheme.headlineMedium),
               Text(v.model),
               Text(v.id),
@@ -373,21 +381,33 @@ class _VehicleDetailState extends ConsumerState<VehicleDetail> {
 }
 
 class RemoteStatus extends StatelessWidget {
-  const RemoteStatus({super.key, required this.store});
+  const RemoteStatus({super.key, required this.store, this.vehicleId});
+  final String? vehicleId;
   final RemoteVehicleStore store;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(8),
-    child: Column(
-      children: [
-        Text(store.loading ? 'Remote · 서버 조회 중…' : 'Remote · Mock API'),
-        if (store.error != null) Text(store.error!),
-        if (store.error != null) const Text('표시 중인 값은 마지막으로 받은 데이터입니다.'),
-        TextButton(
-          onPressed: store.loading ? null : store.refresh,
-          child: const Text('서버 새로고침'),
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final loading = vehicleId == null
+        ? store.loading
+        : store.loadingFor(vehicleId!);
+    final error = vehicleId == null ? store.error : store.errorFor(vehicleId!);
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          Text(loading ? 'Remote · 서버 조회 중…' : 'Remote · Mock API'),
+          if (error != null) Text(error),
+          if (error != null) const Text('표시 중인 값은 마지막으로 받은 데이터입니다.'),
+          TextButton(
+            onPressed: loading
+                ? null
+                : () {
+                    store.refresh();
+                    if (vehicleId != null) store.loadDetail(vehicleId!);
+                  },
+            child: const Text('서버 새로고침'),
+          ),
+        ],
+      ),
+    );
+  }
 }

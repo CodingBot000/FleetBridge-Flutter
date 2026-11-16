@@ -1,5 +1,6 @@
 """Local-only FleetBridge mock REST API. Standard library only."""
 import argparse
+import copy
 import json
 import threading
 import time
@@ -15,6 +16,7 @@ def now():
 class FleetState:
     def __init__(self):
         self.lock = threading.RLock()
+        self.changed = threading.Condition(self.lock)
         self.commands = {}
         self.pending = set()
         self.vehicles = {
@@ -45,13 +47,14 @@ class FleetState:
 class Handler(BaseHTTPRequestHandler):
     def respond(self, code, value):
         body = json.dumps(value, ensure_ascii=False).encode()
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
         try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
+            # Client delivery failure cannot cancel or undo a command.
             pass
 
     def do_GET(self):
@@ -62,15 +65,18 @@ class Handler(BaseHTTPRequestHandler):
         state = self.server.state
         with state.lock:
             if self.path == '/vehicles':
-                self.respond(200, list(state.vehicles.values()))
+                code, value = 200, list(state.vehicles.values())
             elif self.path.startswith('/commands/'):
-                record = state.commands.get(unquote(self.path.removeprefix('/commands/')))
-                self.respond(200 if record else 404, record or {'error': 'not_found'})
+                value = state.commands.get(unquote(self.path.removeprefix('/commands/')))
+                code = 200 if value else 404
             elif self.path.startswith('/vehicles/'):
-                v = state.vehicles.get(unquote(self.path.removeprefix('/vehicles/')))
-                self.respond(200 if v else 404, v or {'error': 'not_found'})
+                value = state.vehicles.get(unquote(self.path.removeprefix('/vehicles/')))
+                code = 200 if value else 404
             else:
-                self.respond(404, {'error': 'not_found'})
+                code, value = 404, None
+            snapshot = copy.deepcopy(value if value is not None else {'error': 'not_found'})
+        # No network writes while holding the shared fleet lock.
+        self.respond(code, snapshot)
 
     def do_POST(self):
         if self.path != '/commands':
@@ -95,28 +101,29 @@ class Handler(BaseHTTPRequestHandler):
             return
         state = self.server.state
         with state.lock:
-            if request_id in state.commands:
-                record = state.commands[request_id]
-                if record['payload'] != payload:
-                    self.respond(409, {'error': 'request_id_conflict'})
-                else:
-                    self.respond(200, record)
-                return
+            existing = state.commands.get(request_id)
             vehicle = state.vehicles.get(vehicle_id)
-            if vehicle is None or vehicle['status'] == 'offline':
-                self.respond(422, {'error': 'unavailable_vehicle'})
-                return
-            if vehicle_id in state.pending:
-                self.respond(409, {'error': 'vehicle_busy'})
-                return
-            record = dict(requestId=request_id, payload=payload, result='pending')
-            state.commands[request_id] = record
-            state.pending.add(vehicle_id)
+            if existing is not None:
+                code, value = ((200, existing) if existing['payload'] == payload
+                               else (409, {'error': 'request_id_conflict'}))
+            elif vehicle is None or vehicle['status'] == 'offline':
+                code, value = 422, {'error': 'unavailable_vehicle'}
+            elif vehicle_id in state.pending:
+                code, value = 409, {'error': 'vehicle_busy'}
+            else:
+                code, value = 200, None
+                record = dict(requestId=request_id, payload=payload, result='pending')
+                state.commands[request_id] = record
+                state.pending.add(vehicle_id)
+            snapshot = copy.deepcopy(value)
+        if snapshot is not None:
+            self.respond(code, snapshot)
+            return
         done = threading.Event()
         def complete():
             try:
-                time.sleep(4 if scenario == 'timeout' else 1)
-                with state.lock:
+                self.server.command_wait(vehicle_id, scenario)
+                with state.changed:
                     vehicle = state.vehicles[vehicle_id]
                     if scenario == 'failure' or vehicle['status'] == 'offline':
                         record['result'] = 'failure'
@@ -125,17 +132,26 @@ class Handler(BaseHTTPRequestHandler):
                         vehicle['revision'] += 1
                         record['result'] = 'success'
                     state.pending.discard(vehicle_id)
+                    state.changed.notify_all()
+            except Exception:
+                # An injected worker failure must not leave the vehicle busy forever.
+                with state.changed:
+                    record['result'] = 'failure'
+                    state.pending.discard(vehicle_id)
+                    state.changed.notify_all()
             finally:
                 done.set()
         threading.Thread(target=complete, daemon=True).start()
         done.wait()
         with state.lock:
-            self.respond(200, record)
+            snapshot = copy.deepcopy(record)
+        self.respond(200, snapshot)
 
 
-def create_server(port=8080, read_delay=0, read_error=False):
+def create_server(port=8080, read_delay=0, read_error=False, command_wait=None):
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     server.state = FleetState()
+    server.command_wait = command_wait or (lambda vehicle_id, scenario: time.sleep(4 if scenario == 'timeout' else 1))
     server.read_delay = read_delay
     server.read_error = read_error
     return server
@@ -146,6 +162,7 @@ def main():
     parser.add_argument('--port', type=int, default=8080)
     parser.add_argument('--read-delay', type=float, default=0)
     parser.add_argument('--read-error', action='store_true')
+    parser.add_argument('--no-ticks', action='store_true', help='Disable simulation ticks for deterministic HTTP tests')
     args = parser.parse_args()
     if args.read_delay < 0:
         parser.error('read-delay must be nonnegative')
@@ -154,7 +171,8 @@ def main():
     def tick():
         while not stop.wait(5):
             server.state.advance()
-    threading.Thread(target=tick, daemon=True).start()
+    if not args.no_ticks:
+        threading.Thread(target=tick, daemon=True).start()
     print(f'FleetBridge mock: http://127.0.0.1:{server.server_port}', flush=True)
     try:
         server.serve_forever()

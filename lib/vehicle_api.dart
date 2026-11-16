@@ -7,9 +7,10 @@ import 'vehicle.dart';
 import 'vehicle_json.dart';
 
 class ApiException implements Exception {
-  const ApiException(this.message, [this.status]);
+  const ApiException(this.message, [this.status, this.rejected = false]);
   final String message;
   final int? status;
+  final bool rejected;
   @override
   String toString() => message;
 }
@@ -30,8 +31,19 @@ class VehicleApi {
   final Uri baseUrl;
   final http.Client client;
   final Duration timeout;
-  CommandResult commandResult(Object? data, String requestId) {
-    if (data is! Map<String, dynamic> || data['requestId'] != requestId) {
+  CommandResult commandResult(
+    Object? data,
+    String requestId,
+    String vehicleId,
+    bool enabled,
+    CommandScenario scenario,
+  ) {
+    if (data is! Map<String, dynamic> ||
+        data['requestId'] != requestId ||
+        data['payload'] is! Map ||
+        (data['payload'] as Map)['vehicleId'] != vehicleId ||
+        (data['payload'] as Map)['enabled'] != enabled ||
+        (data['payload'] as Map)['scenario'] != scenario.name) {
       throw const FormatException('Mismatched command response');
     }
     return switch (data['result']) {
@@ -61,18 +73,52 @@ class VehicleApi {
         )
         .timeout(timeout);
     if (response.statusCode != 200) {
-      throw ApiException('HTTP ${response.statusCode}', response.statusCode);
+      throw responseError(response);
     }
     return commandResult(
       jsonDecode(utf8.decode(response.bodyBytes)),
       requestId,
+      vehicleId,
+      enabled,
+      scenario,
     );
   }
 
-  Future<CommandResult> commandStatus(String requestId) async => commandResult(
+  Future<CommandResult> commandStatus(
+    String requestId, {
+    required String vehicleId,
+    required bool enabled,
+    required CommandScenario scenario,
+  }) async => commandResult(
     await get('/commands/${Uri.encodeComponent(requestId)}'),
     requestId,
+    vehicleId,
+    enabled,
+    scenario,
   );
+  ApiException responseError(http.Response response) {
+    var rejected = false;
+    try {
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (data is Map) {
+        final expected = switch (response.statusCode) {
+          400 => {'invalid_command'},
+          409 => {'request_id_conflict', 'vehicle_busy'},
+          422 => {'unavailable_vehicle'},
+          _ => <String>{},
+        };
+        rejected = expected.contains(data['error']);
+      }
+    } catch (_) {
+      /* An unrecognised response cannot establish non-execution. */
+    }
+    return ApiException(
+      'HTTP ${response.statusCode}',
+      response.statusCode,
+      rejected,
+    );
+  }
+
   Future<Object?> get(String path) async {
     final response = await client.get(baseUrl.resolve(path)).timeout(timeout);
     if (response.statusCode != 200) {
