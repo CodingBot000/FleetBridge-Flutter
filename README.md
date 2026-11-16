@@ -4,7 +4,7 @@
 
 기본 Local 시뮬레이터에 더해, 로컬 Mock REST API를 선택할 수 있습니다. Remote에서는 서버만 차량 상태를 변경하며 앱은 실제 HTTP로 목록·상세·명령 결과를 가져옵니다. 응답 대기시간이 지나면 실패로 확정하지 않고 ‘결과 확인 필요’로 표시합니다. 요청 ID로 결과를 확인하기 전에는 같은 차량에 새 명령을 보내지 않습니다.
 
-[실행과 승인된 명령 정책](docs/specs/v1.1-remote-data.md) · [v1.1 검증 기록](docs/remote-data.md)
+[실행과 승인된 명령 정책](docs/specs/v1.1-remote-data.md) · [v1.1 검증 기록](docs/remote-data.md) · [Android 복구 및 최종 검증](docs/remote-data.md#android-복구-및-최종-검증)
 
 아래 v1.0 기록과 Release는 Full Flutter 이전 당시의 검증 범위를 설명합니다.
 
